@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="dllmain.cpp" />
+    <ClCompile Include="log.cpp" />
+    <ClCompile Include="LogConfigger.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="include\log.h">
+      <Filter>include</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="include">
+      <UniqueIdentifier>{e94bc8bd-a596-48b3-8f59-c8e530588937}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

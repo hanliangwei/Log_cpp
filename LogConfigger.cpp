@@ -1,16 +1,25 @@
-#include "pch.h"
 #include "log.h"
+#include <sstream>
 
-
-namespace TinyLOG
+namespace TinyLog
 {
+	LogConfigger::LogConfigger()
+	{
+		m_logTag = "Vision";
+		m_logRootFolder = ".\\log";
+		m_logOutputMode = 2; 
+		m_logLevel = 2;
+		m_logWriterType = LogWriterType::PER_DAY;
+		m_logPerFixSize = 0;
+		m_logPerFixSizeMaxCount = ULLONG_MAX;
 
-	void LogConfigger::ParseConfigFile(const std::string& filename)
+		parseConfigFile(".\\log.config");
+	}
+	void LogConfigger::parseConfigFile(const std::string& filename)
 	{
 		//writen by gpt
 		std::ifstream configFile(filename);
 		if (!configFile.is_open()) {
-			//LOGE(LogModule::kModuleAll, "Failed to open config file:%s", filename.c_str());
 			std::cout << "Failed to open file: " << filename << std::endl;
 			return;
 		}
@@ -48,8 +57,27 @@ namespace TinyLOG
 
 	}
 
+	std::vector<std::string> LogConfigger::splitString(const std::string& str, char delimiter) {
+		std::vector<std::string> tokens;
+		std::string token;
+		std::istringstream tokenStream(str);
+
+		// 使用getline和istringstream分割字符串  
+		while (std::getline(tokenStream, token, delimiter)) {
+			tokens.push_back(token);
+		}
+
+		return tokens;
+	}
+
 	void LogConfigger::assignConfigValue(const std::string& key, const  std::string& value)
 	{
+		auto assignMask = [&](ModuleMask &mask) {
+			auto moduleNames = splitString(value, '|');
+			for (const auto& n : moduleNames)
+				mask[n] = true;
+		};
+
 		if ("logRootFolder" == key)
 			m_logRootFolder = value;
 		else if ("logTag" == key)
@@ -59,19 +87,20 @@ namespace TinyLOG
 		else if ("logLevel" == key)
 			m_logLevel = std::stoi(value);
 		else if ("logErrorMask" == key)
-			m_logErrorMask = std::stoull(value);
+			assignMask(m_errorMask);
 		else if ("logWarningMask" == key)
-			m_logWarningMask = std::stoull(value);
+			assignMask(m_warningMask);
 		else if ("logInfoMask" == key)
-			m_logInfoMask = std::stoull(value);
+			assignMask(m_infoMask);
 		else if ("logDebugMask" == key)
-			m_logDebugMask = std::stoull(value);
+			assignMask(m_debugMask);
 		else if ("logVerboseMask" == key)
-			m_logVerboseMask = std::stoull(value);
+			assignMask(m_verboseMask);
 		else if ("logWriterType" == key)
-			m_logWriterType = (LTLOG::LogWriterType)std::stoi(value);
+			m_logWriterType = (LogWriterType)std::stoi(value);
 		else if ("logPerFixSize" == key)
 			m_logPerFixSize = std::stoull(value);
+		else if ("logModules" == key)
+			m_moduleNames = splitString(value, '|');
 	}
-
 }

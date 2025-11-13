@@ -15,10 +15,12 @@
 #include <queue>
 #include <fstream>
 #include <memory>
+#include <unordered_map>
+using namespace std;
 
-namespace TinyLOG
+namespace TinyLog
 {
-	inline std::string timeNow(bool bDateOnly = false)
+	inline std::string timeNow(bool bDateOnly = false, string hms_delimiter = ":")
 	{
 		std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
 		std::time_t now_time = std::chrono::system_clock::to_time_t(now);
@@ -34,9 +36,9 @@ namespace TinyLOG
 		if (!bDateOnly)
 		{
 			oss << " "
-				<< std::setfill('0') << std::setw(2) << local_time->tm_hour << ":"
-				<< std::setfill('0') << std::setw(2) << local_time->tm_min << ":"
-				<< std::setfill('0') << std::setw(2) << local_time->tm_sec << ":"
+				<< std::setfill('0') << std::setw(2) << local_time->tm_hour << hms_delimiter
+				<< std::setfill('0') << std::setw(2) << local_time->tm_min << hms_delimiter
+				<< std::setfill('0') << std::setw(2) << local_time->tm_sec << hms_delimiter
 				<< std::setfill('0') << std::setw(3) << ms.count();
 		}
 
@@ -45,33 +47,28 @@ namespace TinyLOG
 		return time_str;
 	}
 
-	inline std::string LogModule2String(LogModule m)
+	/*inline std::string LogModule2String(LogModule m)
 	{
 		switch (m)
 		{
-		case LogModule::kModuleNone: return "";
-		case LogModule::kModuleBIV: return "BIV";
-		case LogModule::kModulePV: return "PV";
-		case LogModule::kModuleBoxCalibration: return "BoxCalibration";
-		case LogModule::kModuleCamera: return "Camera";
-		case LogModule::kModuleAll: return "ModuleAll";
-		case LogModule::kModuleLTFalcon: return "LTFalcon";
-		case LogModule::kModuleImplementHalcon: return "ImplementHalcon";
-		case LogModule::kMarkCore: return "Core";
+		case LogModule::NONE: return "NONE";
+		case LogModule::SW: return "SW";
+		case LogModule::CORE: return "CORE";
 		}
-		return "unknown module";
-	}
+		return "UNKNOWN";
+	}*/
+
 	inline std::string LogLevel2String(LogLevel level)
 	{
 		switch (level)
 		{
-		case LogLevel::kLogError:return "E";
-		case LogLevel::kLogWarning:return "W";
-		case LogLevel::kLogInfo: return "I";
-		case LogLevel::kLogDebug: return "D";
-		case LogLevel::kLogVerbose: return "V";
+		case LogLevel::E:return "E";
+		case LogLevel::W:return "W";
+		case LogLevel::I: return "I";
+		case LogLevel::D: return "D";
+		case LogLevel::V: return "V";
 		}
-		return "unknown level";
+		return "UNKNOWN";
 	}
 
 	inline const char* GetFileName(char* path)
@@ -138,13 +135,45 @@ namespace TinyLOG
 		std::ofstream m_ofs;
 		std::string m_lastDay;
 	};
+	class LogWriterPerModule : public LogWriterBase
+	{
+	public:
+		LogWriterPerModule()
+		{
+			
+		}
+		~LogWriterPerModule() override
+		{
+			for(auto & k : m_moduleOfs)
+				if (k.second.is_open())
+					k.second.close();
+		}
+		void write(const LogItem& logItem) override
+		{
+			string moduleName = LogConfigger::getInstance()->getModuleName(logItem.first.m_logModule);
+			if (m_moduleOfs.find(moduleName) == m_moduleOfs.end())
+			{
+				std::string now = timeNow(false, "_");
+				ofstream ofs;
+				ofs.open((LogConfigger::getInstance()->m_logRootFolder + "\\" + now + " " + moduleName + ".log").c_str(), std::ios::out | std::ios::app);
+				m_moduleOfs[moduleName] = std::move(ofs);
+			}
+			
+			m_moduleOfs[moduleName] << logItem.second;
+			m_moduleOfs[moduleName].flush();
+		}
+	private:
+		unordered_map<string, ofstream> m_moduleOfs;//[module name, ofs]
+	};
+	//每个等级写一个也是每个等级每天一个
 	class LogWriterPerLevel : public LogWriterBase
 	{
 	public:
 		LogWriterPerLevel()
 		{
-			m_LogWriters.resize(LogLevel::kLogLevelCount);
-			for (int i = 0; i < LogLevel::kLogLevelCount; ++i)
+			auto count = (int)LogLevel::COUNT;
+			m_LogWriters.resize(count);
+			for (int i = 0; i < count; ++i)
 			{
 				m_LogWriters[i] = std::make_shared<LogWriterPerDay>();
 				CreateRecursiveDirectory(LogConfigger::getInstance()->m_logRootFolder + "\\" + LogLevel2String((LogLevel)i));
@@ -238,6 +267,7 @@ namespace TinyLOG
 		void addMsg(const LogItem& msg)
 		{
 			if (!m_bRunning) return;
+
 			std::lock_guard<std::mutex> lk(m_writerLock);
 			m_logCaches.push(msg);
 			m_cv.notify_all();
@@ -256,13 +286,18 @@ namespace TinyLOG
 		OfflineLogger()
 		{
 			auto logWriteType = LogConfigger::getInstance()->m_logWriterType;
-			if (LogWriterType::PerDay == logWriteType)
+			if (LogWriterType::PER_DAY == logWriteType)
 				m_pLogWritter = std::make_shared<LogWriterPerDay>();
-			else if (LogWriterType::PerFixedSize == logWriteType)
+			else if (LogWriterType::PER_FIXED_SIZE == logWriteType)
 				m_pLogWritter = std::make_shared<LogWriterPerFixedSize>();
-			else if (LogWriterType::PerLevel == logWriteType)
+			else if (LogWriterType::PER_LEVEL == logWriteType)
 				m_pLogWritter = std::make_shared<LogWriterPerLevel>();
+			else if(LogWriterType::PER_MODULE == logWriteType)
+				m_pLogWritter = std::make_shared<LogWriterPerModule>();
+			else
+				m_pLogWritter = std::make_shared<LogWriterPerDay>();
 		}
+
 		OfflineLogger(const OfflineLogger&) = delete;
 		OfflineLogger operator = (const OfflineLogger&) = delete;
 		void run()
@@ -308,18 +343,21 @@ namespace TinyLOG
 	};
 	std::once_flag  OfflineLogger::m_initFlag;
 
-	extern "C" __declspec(dllexport) void LOG(LogLevel level, LogModule module, const char* szFileName, const char* szFuncName, int nLine, const char* format, ...) {
-
+	extern "C" __declspec(dllexport) void iTinyLog_LOG(LogLevel level, ModuleIndex moduleIdx, const char* szFileName,
+		const char* szFuncName, int nLine, const char* format, ...) 
+	{
+		auto config = LogConfigger::getInstance();
+		string moduleName = LogConfigger::getInstance()->getModuleName(moduleIdx);
 		if (LogConfigger::getInstance()->m_logLevel < (int)level ||
-			(level == LogLevel::kLogError && (LogConfigger::getInstance()->m_logErrorMask & module) == 0) ||
-			(level == LogLevel::kLogWarning && (LogConfigger::getInstance()->m_logWarningMask & module) == 0) ||
-			(level == LogLevel::kLogInfo && (LogConfigger::getInstance()->m_logInfoMask & module) == 0) ||
-			(level == LogLevel::kLogDebug && (LogConfigger::getInstance()->m_logDebugMask & module) == 0) ||
-			(level == LogLevel::kLogVerbose && (LogConfigger::getInstance()->m_logVerboseMask & module) == 0))
+			(level == LogLevel::E && (config->m_errorMask.empty() || config->m_errorMask.count(moduleName) == 0)) ||
+			(level == LogLevel::W && (config->m_warningMask.empty() || config->m_warningMask.count(moduleName) == 0)) ||
+			(level == LogLevel::I && (config->m_infoMask.empty() || config->m_infoMask.count(moduleName) == 0)) ||
+			(level == LogLevel::D && (config->m_debugMask.empty() || config->m_debugMask.count(moduleName) == 0)) ||
+			(level == LogLevel::V && (config->m_verboseMask.empty() || config->m_verboseMask.count(moduleName) == 0)))
 		{
 			return;
 		}
-		
+
 		va_list args;
 		va_start(args, format);
 		char msg[4096] = { 0 };
@@ -329,7 +367,7 @@ namespace TinyLOG
 			timeNow().c_str(),
 			LogConfigger::getInstance()->m_logTag,
 			LogLevel2String(level).c_str(),
-			LogModule2String(module).c_str(),
+			moduleName,
 			GetFileName(const_cast<char*>(szFileName)),
 			szFuncName,
 			nLine,
@@ -338,27 +376,28 @@ namespace TinyLOG
 		vsnprintf(msg + strlen(msg), sizeof(msg) - strlen(msg) - 1, format, args);
 		strcat(msg, "\n");
 
-		if ((LogConfigger::getInstance()->m_logOutputMode & LogOutputMode::Console) != 0)
+		if ((LogConfigger::getInstance()->m_logOutputMode & (ULL)LogOutputMode::CONSOLE) != 0)
 			std::cout << msg;
-		if ((LogConfigger::getInstance()->m_logOutputMode & LogOutputMode::SystemDebugger) != 0)
+		if ((LogConfigger::getInstance()->m_logOutputMode & (ULL)LogOutputMode::SYSTEM_DEBUGGER) != 0)
 			OutputDebugStringA(msg);
-		if ((LogConfigger::getInstance()->m_logOutputMode & LogOutputMode::File) != 0)
-			OfflineLogger::getInstance()->addMsg({ {level,module},std::string(msg) });
+		if ((LogConfigger::getInstance()->m_logOutputMode & (ULL)LogOutputMode::FILE) != 0)
+			OfflineLogger::getInstance()->addMsg({ {level, moduleIdx},std::string(msg) });
 
 		va_end(args);
 	}
 
-	extern "C" __declspec(dllexport) void LogInf(LogLevel level, LogModule module,char *file, char * func,int line, char* msg)
+	extern "C" __declspec(dllexport) int iTinyLog_GetLogModuleIndex(const char* szModuleName)
 	{
-		LOG(level, module, file, func, line, msg);
+		string moduleName = szModuleName;
+		return LogConfigger::getInstance()->getModuleIndex(moduleName);
 	}
 
-	extern "C" __declspec(dllexport) void SetLogLevel(int level)
+	extern "C" __declspec(dllexport) void iTinyLog_SetLogLevel(int level)
 	{
 		LogConfigger::getInstance()->m_logLevel = level;
 	}
 
-	extern "C" __declspec(dllexport) int GetLogLevel()
+	extern "C" __declspec(dllexport) int iTinyLog_GetLogLevel()
 	{
 		return LogConfigger::getInstance()->m_logLevel;
 	}
